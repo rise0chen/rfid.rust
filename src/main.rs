@@ -25,7 +25,7 @@ fn main() {
 
         // mfrc.init().expect("Init failed!");
 
-        mfrc.dump_registers().expect("Could not dump registers");
+        // mfrc.dump_registers().expect("Could not dump registers");
 
         if new_card {
             match mfrc.read_card_serial() {
@@ -33,14 +33,7 @@ fn main() {
                 Err(e) => println!("could not read card: {:?}", e),
             }
 
-            mfrc.dump_registers().expect("Could not dump registers");
-
-            match mfrc.read_card_serial() {
-                Ok(u) => println!("read card serial {:?}", u),
-                Err(e) => println!("could not read card: {:?}", e),
-            }
-
-            mfrc.dump_registers().expect("Could not dump registers");
+            // mfrc.dump_registers().expect("Could not dump registers");
         }
     }
 }

@@ -6,6 +6,8 @@ use std::time;
 
 use spidev;
 
+pub mod picc;
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum Register {
@@ -42,8 +44,8 @@ pub enum Register {
     // Reserved         = 0x1E,
     SerialSpeedReg = 0x1F,
     // Reserved         = 0x20,
-    CRCResultRegLow = 0x21,
-    CRCResultRegHigh = 0x22,
+    CRCResultRegHigh = 0x21,
+    CRCResultRegLow = 0x22,
     // Reserved         = 0x23,
     ModWidthReg = 0x24,
     // Reserved         = 0x25,
@@ -53,10 +55,10 @@ pub enum Register {
     ModGsPReg = 0x29,
     TModeReg = 0x2A,
     TPrescalerReg = 0x2B,
-    TReloadRegLow = 0x2C,
-    TReloadRegHigh = 0x2D,
-    TCounterValRegLow = 0x2E,
-    TCounterValRegHigh = 0x2F,
+    TReloadRegHigh = 0x2C,
+    TReloadRegLow = 0x2D,
+    TCounterValRegHigh = 0x2E,
+    TCounterValRegLow = 0x2F,
     // Reserved         = 0x30,
     TestSel1Reg = 0x31,
     TestSel2Reg = 0x32,
@@ -88,44 +90,17 @@ pub enum Command {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PiccCommand {
-    REQA = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
-    WUPA = 0x52, // Wake-UP command, Type A. Invites PICCs in state IDLE and HALT to go to READY(*) and prepare for anticollision or selection. 7 bit frame.
-    CT = 0x88,   // Cascade Tag. Not really a command, but used during anti collision.
-    SelCl1 = 0x93, // Anti collision/Select, Cascade Level 1
-    SelCl2 = 0x95, // Anti collision/Select, Cascade Level 2
-    SelCl3 = 0x97, // Anti collision/Select, Cascade Level 3
-    HLTA = 0x50, // HaLT command, Type A. Instructs an ACTIVE PICC to go to state HALT.
-    RATS = 0xE0, // Request command for Answer To Reset.
-    // The commands used for MIFARE Classic (from http://www.mouser.com/ds/2/302/MF1S503x-89574.pdf, Section 9)
-    // Use PCD_MFAuthent to authenticate access to a sector, then use these commands to read/write/modify the blocks on the sector.
-    // The read/write commands can also be used for MIFARE Ultralight.
-    MfAuthKeyA = 0x60,  // Perform authentication with Key A
-    MfAuthKeyB = 0x61,  // Perform authentication with Key B
-    MfRead = 0x30, // Reads one 16 byte block from the authenticated sector of the PICC. Also used for MIFARE Ultralight.
-    MfWrite = 0xA0, // Writes one 16 byte block to the authenticated sector of the PICC. Called "COMPATIBILITY WRITE" for MIFARE Ultralight.
-    MfDecrement = 0xC0, // Decrements the contents of a block and stores the result in the internal data register.
-    MfIncrement = 0xC1, // Increments the contents of a block and stores the result in the internal data register.
-    MfRestore = 0xC2,   // Reads the contents of a block into the internal data register.
-    MfTransfer = 0xB0,  // Writes the contents of the internal data register to a block.
-    // The commands used for MIFARE Ultralight (from http://www.nxp.com/documents/data_sheet/MF0ICU1.pdf, Section 8.6)
-    // The PICC_CMD_MF_READ and PICC_CMD_MF_WRITE can also be used for MIFARE Ultralight.
-    UlWrite = 0xA2, // Writes one 4 byte page to the PICC.
-}
-
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Error {
-    Io(io::Error),           // Error from std::io
-    Communication,           // Error in communication
-    Collision(PiccResponse), // Collission detected
-    Timeout,                 // Timeout in communication.
-    NoRoom,                  // A buffer is not big enough.
-    InternalError,           // Internal error in the code. Should not happen.
-    Invalid,                 // Invalid argument.
-    CrcWrong,                // The CRC_A does not match
-    MifareNack,              // A MIFARE PICC responded with NAK.
+    Io(io::Error), // Error from std::io
+    Communication, // Error in communication
+    Collision,     // Collission detected
+    Timeout,       // Timeout in communication.
+    NoRoom,        // A buffer is not big enough.
+    InternalError, // Internal error in the code. Should not happen.
+    Invalid,       // Invalid argument.
+    CrcWrong,      // The CRC_A does not match
+    MifareNack,    // A MIFARE PICC responded with NAK.
 }
 
 impl From<io::Error> for Error {
@@ -140,12 +115,6 @@ type Result<T> = result::Result<T, Error>;
 pub struct Uid {
     bytes: Vec<u8>,         // The UID can have 4, 7 or 10 bytes.
     select_acknowledge: u8, // The SAK (Select acknowledge) byte returned from the PICC after successful selection.
-}
-
-#[derive(Debug)]
-pub struct PiccResponse {
-    data: Vec<u8>,
-    valid_bits: u8,
 }
 
 pub struct MFRC522 {
@@ -179,26 +148,28 @@ impl MFRC522 {
             return Ok(Vec::new());
         }
         let address = MFRC522::register_to_readvalue(reg);
-        let tx_buf = vec![address; count];
-        let mut rx_buf = vec![0u8; count];
+        let mut tx_buf = vec![address; count];
+        tx_buf.push(0);
+        let mut rx_buf = vec![0u8; count + 1];
         {
             let mut transfer = spidev::SpidevTransfer::read_write(&tx_buf, &mut rx_buf);
             self.spi.transfer(&mut transfer)?;
         }
         // println!("Read {:#x?} from {:?}", rx_buf, reg);
+        rx_buf.remove(0);
         Ok(rx_buf)
     }
 
     pub fn write_register(&mut self, reg: Register, value: u8) -> Result<()> {
         let rval = MFRC522::register_to_writevalue(reg);
-        self.spi.write(&[rval, value])?;
+        self.spi.write_all(&[rval, value])?;
         // println!("Wrote {:#x?} to {:?}", value, reg);
         Ok(())
     }
 
     pub fn write_multiple(&mut self, reg: Register, value: &[u8]) -> Result<()> {
         let rval = MFRC522::register_to_writevalue(reg);
-        self.spi.write(&[&[rval], value].concat())?;
+        self.spi.write_all(&[&[rval], value].concat())?;
         // println!("Wrote {:#x?} to {:?}", value, reg);
         Ok(())
     }
@@ -326,6 +297,7 @@ impl MFRC522 {
         Err(Error::Timeout)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn communicate_with_picc(
         &mut self,
         command: Command, // The command to execute. One of the PCD_Command enums.
@@ -336,7 +308,7 @@ impl MFRC522 {
         valid_bits: u8, // The number of valid bits in the last byte. 0 for 8 valid bits.
         rx_align: u8, // Defines the bit position for the first bit received. Default 0.
         check_crc: bool,
-    ) -> Result<PiccResponse> // Returns: data received from the MFRC522 + the number of valid bits in the last byte of the data
+    ) -> Result<picc::Response> // Returns: data received from the MFRC522 + the number of valid bits in the last byte of the data
     {
         // Prepare values for BitFramingReg
         let bit_framing = (rx_align << 4) + valid_bits; // RxAlign = BitFramingReg[6..4]. TxLastBits = BitFramingReg[2..0]
@@ -370,7 +342,6 @@ impl MFRC522 {
             i -= 1;
         }
 
-        println!("try read ComIrqReg {:?}", i);
         // 35.7ms and nothing happend. Communication with the MFRC522 might be down.
         if i == 0 {
             return Err(Error::Timeout);
@@ -402,10 +373,11 @@ impl MFRC522 {
 
         // Tell about collisions
         if error_reg_value & 0x08 != 0 {
-            return Err(Error::Collision(PiccResponse {
+            return Ok(picc::Response {
                 data: recv_data,
                 valid_bits: recv_valid_bits,
-            }));
+                had_collision: true,
+            });
         }
 
         // Perform CRC_A validation if requested.
@@ -427,9 +399,10 @@ impl MFRC522 {
             }
         }
 
-        Ok(PiccResponse {
+        Ok(picc::Response {
             data: recv_data,
             valid_bits: recv_valid_bits,
+            had_collision: false,
         })
     }
 
@@ -441,7 +414,7 @@ impl MFRC522 {
         valid_bits: u8,   // The number of valid bits in the last byte. 0 for 8 valid bits.
         rx_align: u8,     // Defines the bit position for the first bit received. Default 0.
         check_crc: bool,
-    ) -> Result<PiccResponse> {
+    ) -> Result<picc::Response> {
         // Returns: data received from the MFRC522 + the number of valid bits in the last byte of the data
         let wait_irq = 0x30;
         self.communicate_with_picc(
@@ -457,12 +430,12 @@ impl MFRC522 {
     }
 
     pub fn request_a(&mut self, buffer_size: u8) -> Result<Vec<u8>> {
-        self.request_a_or_wakeup_a(PiccCommand::REQA, buffer_size)
+        self.request_a_or_wakeup_a(picc::Command::REQA, buffer_size)
     }
 
     pub fn request_a_or_wakeup_a(
         &mut self,
-        command: PiccCommand, // The command to send - PICC_CMD_REQA or PICC_CMD_WUPA
+        command: picc::Command, // The command to send - PICC_CMD_REQA or PICC_CMD_WUPA
         buffer_size: u8,
     ) -> Result<Vec<u8>> {
         if buffer_size < 2 {
@@ -481,6 +454,7 @@ impl MFRC522 {
             // ATQA must be exactly 16 bits.
             return Err(Error::Communication);
         }
+
         Ok(picc_response.data)
     }
 
@@ -499,15 +473,15 @@ impl MFRC522 {
         let mut buffer_used: u8; // The number of bytes used in the buffer, ie the number of bytes to transfer to the FIFO.
         let mut rx_align: u8; // Used in BitFramingReg. Defines the bit position for the first bit received.
         let mut tx_last_bits = 0u8; // Used in BitFramingReg. The number of valid bits in the last transmitted byte.
-        let mut response_buffer = Vec::<u8>::new();
         let mut response_length;
         let mut response_uid = Uid {
             bytes: vec![0u8; 10],
             select_acknowledge: 0,
         };
-        let mut picc_response = PiccResponse {
+        let mut picc_response = picc::Response {
             data: Vec::new(),
             valid_bits: 0,
+            had_collision: false,
         };
 
         // Description of buffer structure:
@@ -556,18 +530,18 @@ impl MFRC522 {
             // Set the Cascade Level in the SEL byte, find out if we need to use the Cascade Tag in byte 2.
             match cascade_level {
                 1 => {
-                    buffer[0] = PiccCommand::SelCl1 as u8;
+                    buffer[0] = picc::Command::SelCl1 as u8;
                     uid_index = 0;
                     use_cascade_tag = valid_bits != 0 && uid.bytes.len() > 4; // When we know that the UID has more than 4 bytes
                 }
 
                 2 => {
-                    buffer[0] = PiccCommand::SelCl2 as u8;
+                    buffer[0] = picc::Command::SelCl2 as u8;
                     uid_index = 3;
                     use_cascade_tag = valid_bits != 0 && uid.bytes.len() > 7; // When we know that the UID has more than 7 bytes
                 }
                 3 => {
-                    buffer[0] = PiccCommand::SelCl3 as u8;
+                    buffer[0] = picc::Command::SelCl3 as u8;
                     uid_index = 6;
                     use_cascade_tag = false; // Never used in CL3.
                 }
@@ -584,7 +558,7 @@ impl MFRC522 {
             // Copy the known bits from uid->uidByte[] to buffer[]
             index = 2; // destination index in buffer[]
             if use_cascade_tag {
-                buffer[index] = PiccCommand::CT as u8;
+                buffer[index] = picc::Command::CT as u8;
                 index += 1;
             }
             // The number of bytes needed to represent the known bits for this level.
@@ -616,7 +590,7 @@ impl MFRC522 {
                 if current_level_known_bits >= 32 {
                     // All UID bits in this Cascade Level are known. This is a SELECT.
                     buffer[1] = 0x70; // NVB - Number of Valid Bits: Seven whole bytes
-                                      // Calculate BCC - Block Check Character
+                    // Calculate BCC - Block Check Character
                     buffer[6] = buffer[2] ^ buffer[3] ^ buffer[4] ^ buffer[5];
                     // Calculate CRC_A
                     let crc = self.calculate_crc(&buffer[0..7])?;
@@ -626,7 +600,7 @@ impl MFRC522 {
                     tx_last_bits = 0; // 0 => All 8 bits are valid.
                     buffer_used = 9;
                     // Store response in the last 3 bytes of buffer (BCC and CRC_A - not needed after tx)
-                    response_buffer.extend_from_slice(&buffer[6..9]);
+                    index = 6;
                     response_length = 3;
                 } else {
                     // This is an ANTICOLLISION.
@@ -636,7 +610,6 @@ impl MFRC522 {
                     buffer[1] = ((index as u8) << 4) + tx_last_bits; // NVB - Number of Valid Bits
                     buffer_used = index as u8 + if tx_last_bits != 0 { 1 } else { 0 };
                     // Store response in the unused part of buffer
-                    response_buffer.extend_from_slice(&buffer[index..]);
                     response_length = (buffer.len() - index) as u8;
                 }
 
@@ -658,25 +631,17 @@ impl MFRC522 {
                             "Received select data: {:?} with clkb: {:?}",
                             response.data, current_level_known_bits
                         );
-                        if current_level_known_bits >= 32 {
-                            // This was a SELECT.
-                            select_done = true; // No more anticollision
-                                                // We continue below outside the while.
-                        } else {
-                            // This was an ANTICOLLISION.
-                            // We now have all 32 bits of the UID in this Cascade Level
-                            current_level_known_bits = 32;
-                            // Run loop again to do the SELECT.
-                        }
                         picc_response = response;
-                    }
-                    Err(e) => match e {
-                        // More than one PICC in the field => collision.
-                        Error::Collision(response) => {
+                        // TODO: this is wrong, &buffer[6..] does not use index
+                        for (i, &e) in picc_response.data.iter().enumerate() {
+                            buffer[index + i] = e;
+                        }
+
+                        if picc_response.had_collision {
                             let value_of_coll_reg = self.read_register(Register::CollReg)?; // CollReg[7..0] bits are: ValuesAfterColl reserved CollPosNotValid CollPos[4:0]
                             if value_of_coll_reg & 0x20 != 0 {
                                 // CollPosNotValid
-                                return Err(Error::Collision(response)); // Without a valid collision position we cannot continue
+                                return Err(Error::Collision); // Without a valid collision position we cannot continue
                             }
                             let mut collision_pos = value_of_coll_reg & 0x1F; // Values 0-31, 0 means bit 32.
                             if collision_pos == 0 {
@@ -695,24 +660,30 @@ impl MFRC522 {
                                 + (if count != 0 { 1 } else { 0 }))
                                 as usize; // First byte is index 0.
                             buffer[index] |= 1 << check_bit;
-
-                            picc_response = response;
+                        } else if current_level_known_bits >= 32 {
+                            // This was a SELECT.
+                            select_done = true; // No more anticollision
+                                                // We continue below outside the while.
+                        } else {
+                            // This was an ANTICOLLISION.
+                            // We now have all 32 bits of the UID in this Cascade Level
+                            current_level_known_bits = 32;
+                            // Run loop again to do the SELECT.
                         }
-                        // Some other error, return it
-                        _ => return Err(e),
-                    },
+                    }
+                    Err(e) => return Err(e),
                 };
             } // End of while !select_done
 
             // We do not check the CBB - it was constructed by us above.
 
             // Copy the found UID bytes from buffer[] to uid->uidByte[]
-            index = if buffer[2] == PiccCommand::CT as u8 {
+            index = if buffer[2] == picc::Command::CT as u8 {
                 3
             } else {
                 2
             };
-            bytes_to_copy = if buffer[2] == PiccCommand::CT as u8 {
+            bytes_to_copy = if buffer[2] == picc::Command::CT as u8 {
                 3
             } else {
                 4
@@ -733,7 +704,7 @@ impl MFRC522 {
                 return Err(Error::CrcWrong);
             }
             if picc_response.data[0] & 0x04 != 0 {
-                // Cascade bit set - UID not complete yes
+                // Cascade bit set - UID not complete yet
                 cascade_level += 1;
             } else {
                 uid_complete = true;
@@ -754,10 +725,7 @@ impl MFRC522 {
 
         match self.request_a(2) {
             Ok(_) => Ok(()),
-            Err(e) => match e {
-                Error::Collision(_) => Ok(()),
-                _ => Err(e),
-            },
+            Err(e) => Err(e),
         }
     }
 
