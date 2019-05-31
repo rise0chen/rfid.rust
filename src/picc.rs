@@ -26,8 +26,42 @@ pub enum Command {
 }
 
 #[derive(Debug)]
+pub enum Type {
+    Unknown,
+    Iso14443_4,    // PICC compliant with ISO/IEC 14443-4 
+    Iso18092,      // PICC compliant with ISO/IEC 18092 (NFC)
+    MifareMini,    // MIFARE Classic protocol, 320 bytes
+    Mifare1k,      // MIFARE Classic protocol, 1KB
+    Mifare4k,      // MIFARE Classic protocol, 4KB
+    MifareUL,      // MIFARE Ultralight or Ultralight C
+    MifarePlus,    // MIFARE Plus
+    MifareDesfire, // MIFARE DESFire
+    TNP3XXX,       // Only mentioned in NXP AN 10833 MIFARE Type Identification Procedure
+    NotComplete,   // SAK indicates UID is not complete.
+}
+
+#[derive(Debug)]
 pub struct Response {
     pub data: Vec<u8>,
     pub valid_bits: u8,
     pub had_collision: bool,
+}
+
+pub fn get_type(sak: u8) -> Type {
+    // http://www.nxp.com/documents/application_note/AN10833.pdf 
+    // 3.2 Coding of Select Acknowledge (SAK)
+    // ignore 8-bit (iso14443 starts with LSBit = bit 1)
+    // fixes wrong type for manufacturer Infineon (http://nfc-tools.org/index.php?title=ISO14443A)
+    match sak & 0x7F {
+        0x04 => Type::NotComplete, // UID not complete
+        0x09 => Type::MifareMini,
+        0x08 => Type::Mifare1k,
+        0x18 => Type::Mifare4k,
+        0x00 => Type::MifareUL,
+        0x10 | 0x11 => Type::MifarePlus,
+        0x01 => Type::TNP3XXX,
+        0x20 => Type::Iso14443_4,
+        0x40 => Type::Iso18092,
+        _ =>    Type::Unknown,
+    }
 }

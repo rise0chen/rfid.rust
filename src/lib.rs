@@ -117,6 +117,11 @@ pub struct Uid {
     select_acknowledge: u8, // The SAK (Select acknowledge) byte returned from the PICC after successful selection.
 }
 
+const MIFARE_ACK: u8 = 0xA;
+
+const MIFARE_KEYSIZE: usize = 6;
+pub type MifareKey = [u8; MIFARE_KEYSIZE];
+
 pub struct MFRC522 {
     pub spi: spidev::Spidev,
 }
@@ -171,55 +176,6 @@ impl MFRC522 {
         let rval = MFRC522::register_to_writevalue(reg);
         self.spi.write_all(&[&[rval], value].concat())?;
         // println!("Wrote {:#x?} to {:?}", value, reg);
-        Ok(())
-    }
-
-    pub fn dump_registers(&mut self) -> Result<()> {
-        for &reg in [
-            Register::CommandReg,
-            Register::ComlEnReg,
-            Register::DivlEnReg,
-            Register::ComIrqReg,
-            Register::DivIrqReg,
-            Register::ErrorReg,
-            Register::Status1Reg,
-            Register::Status2Reg,
-            Register::FIFODataReg,
-            Register::FIFOLevelReg,
-            Register::WaterLevelReg,
-            Register::ControlReg,
-            Register::BitFramingReg,
-            Register::CollReg,
-            Register::ModeReg,
-            Register::TxModeReg,
-            Register::RxModeReg,
-            Register::TxControlReg,
-            Register::TxASKReg,
-            Register::TxSelReg,
-            Register::RxSelReg,
-            Register::RxThresholdReg,
-            Register::DemodReg,
-            Register::MfTxReg,
-            Register::MfRxReg,
-            Register::SerialSpeedReg,
-            Register::CRCResultRegLow,
-            Register::CRCResultRegHigh,
-            Register::ModWidthReg,
-            Register::RFCfgReg,
-            Register::GsNReg,
-            Register::CWGsPReg,
-            Register::ModGsPReg,
-            Register::TModeReg,
-            Register::TPrescalerReg,
-            Register::TReloadRegLow,
-            Register::TReloadRegHigh,
-            Register::TCounterValRegLow,
-            Register::TCounterValRegHigh,
-        ]
-        .iter()
-        {
-            println!("{:?}: {:02x?}", reg, self.read_register(reg)?);
-        }
         Ok(())
     }
 
@@ -590,7 +546,7 @@ impl MFRC522 {
                 if current_level_known_bits >= 32 {
                     // All UID bits in this Cascade Level are known. This is a SELECT.
                     buffer[1] = 0x70; // NVB - Number of Valid Bits: Seven whole bytes
-                    // Calculate BCC - Block Check Character
+                                      // Calculate BCC - Block Check Character
                     buffer[6] = buffer[2] ^ buffer[3] ^ buffer[4] ^ buffer[5];
                     // Calculate CRC_A
                     let crc = self.calculate_crc(&buffer[0..7])?;
@@ -716,6 +672,170 @@ impl MFRC522 {
         response_uid.bytes.truncate(3 * cascade_level as usize + 1);
 
         Ok(response_uid)
+    }
+
+    pub fn halt_a(&mut self) -> Result<()> {
+        let mut buffer = vec![picc::Command::HLTA as u8, 0, 0, 0];
+        let crc = self.calculate_crc(&buffer[0..2])?;
+        buffer[2] = crc[0];
+        buffer[3] = crc[1];
+
+        // Send the command.
+        // The standard says:
+        //		If the PICC responds with any modulation during a period of 1 ms after the end of the frame containing the
+        //		HLTA command, this response shall be interpreted as 'not acknowledge'.
+        // We interpret that this way: Only STATUS_TIMEOUT is a success.
+        match self.transceive_data(&buffer, 4, 0, 0, 0, false) {
+            Err(Error::Timeout) => Ok(()),
+            Ok(_) => Err(Error::Invalid),
+            Err(e) => Err(e),
+        }
+    }
+
+    /**
+     * Executes the MFRC522 MFAuthent command.
+     * This command manages MIFARE authentication to enable a secure communication to any MIFARE Mini, MIFARE 1K and MIFARE 4K card.
+     * The authentication is described in the MFRC522 datasheet section 10.3.1.9 and http://www.nxp.com/documents/data_sheet/MF1S503x.pdf section 10.1.
+     * For use with MIFARE Classic PICCs.
+     * The PICC must be selected - ie in state ACTIVE(*) - before calling this function.
+     * Remember to call PCD_StopCrypto1() after communicating with the authenticated PICC - otherwise no new communications can start.
+     *
+     * All keys are set to FFFFFFFFFFFFh at chip delivery.
+     *
+     * @return STATUS_OK on success, STATUS_??? otherwise. Probably STATUS_TIMEOUT if you supply the wrong key.
+     */
+    pub fn authenticate(
+        &mut self,
+        command: picc::Command, // PICC_CMD_MF_AUTH_KEY_A or PICC_CMD_MF_AUTH_KEY_B
+        block_addr: u8,         // The block number. See numbering in the comments in the readme.
+        key: MifareKey,         // Pointer to the Crypteo1 key to use (6 bytes)
+        uid: &Uid,              // Pointer to Uid struct. The first 4 bytes of the UID is used.
+    ) -> Result<picc::Response> {
+        let wait_irq = 0x10u8; // IdleIRq
+
+        // Build command buffer
+        let mut send_data = vec![0u8; 12];
+        send_data[0] = command as u8;
+        send_data[1] = block_addr;
+        send_data[2..2 + MIFARE_KEYSIZE].clone_from_slice(&key[..MIFARE_KEYSIZE]);
+
+        // Use the last uid bytes as specified in http://cache.nxp.com/documents/application_note/AN10927.pdf
+        // section 3.2.5 "MIFARE Classic Authentication".
+        // The only missed case is the MF1Sxxxx shortcut activation,
+        // but it requires cascade tag (CT) byte, that is not part of uid.
+        for i in 0..4 {
+            // The last 4 bytes of the UID
+            send_data[8 + i] = uid.bytes[uid.bytes.len() - 4 + i];
+        }
+
+        // Start the authentication.
+        self.communicate_with_picc(Command::MFAuthent, wait_irq, &send_data, 12, 0, 0, 0, false)
+    }
+
+    pub fn stop_crypto1(&mut self) -> Result<()> {
+        // Clear MFCrypto1On bit
+        // Status2Reg[7..0] bits are: TempSensClear I2CForceHS reserved reserved MFCrypto1On ModemState[2:0]
+        self.clear_register_bitmask(Register::Status2Reg, 0x08)
+    }
+
+    /**
+     * Reads 16 bytes (+ 2 bytes CRC_A) from the active PICC.
+     *
+     * For MIFARE Classic the sector containing the block must be authenticated before calling this function.
+     *
+     * For MIFARE Ultralight only addresses 00h to 0Fh are decoded.
+     * The MF0ICU1 returns a NAK for higher addresses.
+     * The MF0ICU1 responds to the READ command by sending 16 bytes starting from the page address defined by the command argument.
+     * For example; if blockAddr is 03h then pages 03h, 04h, 05h, 06h are returned.
+     * A roll-back is implemented: If blockAddr is 0Eh, then the contents of pages 0Eh, 0Fh, 00h and 01h are returned.
+     *
+     * The buffer must be at least 18 bytes because a CRC_A is also returned.
+     * Checks the CRC_A before returning STATUS_OK.
+     *
+     * @return STATUS_OK on success, STATUS_??? otherwise.
+     */
+    pub fn mifare_read(&mut self, block_addr: u8, back_len: u8) -> Result<picc::Response> {
+        if back_len < 18 {
+            return Err(Error::NoRoom);
+        }
+
+        let mut send_data = vec![picc::Command::MfRead as u8, block_addr];
+        let crc = self.calculate_crc(&send_data)?;
+        send_data.extend_from_slice(&crc);
+
+        // Transmit the buffer and receive the response, validate CRC_A.
+        self.transceive_data(&send_data, 4, back_len, 0, 0, true)
+    }
+
+    /**
+     * Writes 16 bytes to the active PICC.
+     *
+     * For MIFARE Classic the sector containing the block must be authenticated before calling this function.
+     *
+     * For MIFARE Ultralight the operation is called "COMPATIBILITY WRITE".
+     * Even though 16 bytes are transferred to the Ultralight PICC, only the least significant 4 bytes (bytes 0 to 3)
+     * are written to the specified address. It is recommended to set the remaining bytes 04h to 0Fh to all logic 0.
+     * *
+     * @return STATUS_OK on success, STATUS_??? otherwise.
+     */
+    pub fn mifare_write(&mut self, block_addr: u8, buffer: &[u8]) -> Result<()> {
+        if buffer.len() < 16 {
+            return Err(Error::Invalid);
+        }
+
+        // Mifare Classic protocol requires two communications to perform a write.
+        // Step 1: Tell the PICC we want to write to block blockAddr.
+        let mut cmd_buffer = vec![picc::Command::MfWrite as u8, block_addr];
+        self.mifare_transceive(&cmd_buffer, false)?;
+
+        self.mifare_transceive(buffer, false)
+    }
+
+    /**
+     * Wrapper for MIFARE protocol communication.
+     * Adds CRC_A, executes the Transceive command and checks that the response is MF_ACK or a timeout.
+     *
+     * @return STATUS_OK on success, STATUS_??? otherwise.
+     */
+    pub fn mifare_transceive(&mut self, send_data: &[u8], accept_timeout: bool) -> Result<()> {
+
+        if send_data.len() > 16 {
+            return Err(Error::Invalid);
+        }
+
+        let mut cmd_buffer = send_data.to_vec();
+        // Copy sendData[] to cmdBuffer[] and add CRC_A
+        let crc = self.calculate_crc(&send_data)?;
+        cmd_buffer.extend_from_slice(&crc);
+
+        // Transceive the data, store the reply in cmdBuffer[]
+        let wait_irq = 0x30;
+        let valid_bits = 0;
+        let response = match self.communicate_with_picc(
+            Command::Transceive,
+            wait_irq,
+            &cmd_buffer,
+            0,
+            cmd_buffer.len() as u8,
+            valid_bits,
+            0,
+            false,
+        ) {
+            Ok(r) => r,
+            Err(Error::Timeout) if accept_timeout => return Ok(()),
+            Err(e) => return Err(e),
+        };
+
+        // The PICC must reply with a 4 bit ACK
+        if response.data.len() != 1 || response.valid_bits != 4 {
+            return Err(Error::Invalid);
+        }
+
+        if response.data[0] != MIFARE_ACK {
+            return Err(Error::MifareNack);
+        }
+
+        Ok(())
     }
 
     pub fn new_card_present(&mut self) -> Result<()> {
