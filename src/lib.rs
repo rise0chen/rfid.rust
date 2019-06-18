@@ -253,13 +253,18 @@ impl MFRC522 {
         Err(Error::Timeout)
     }
 
+    /**
+     * Transfers data to the MFRC522 FIFO, executes a command, waits for completion and transfers data back from the FIFO.
+     * CRC validation will only be done if back_len is specified.
+     *
+     * @return STATUS_OK on success, STATUS_??? otherwise.
+     */
     #[allow(clippy::too_many_arguments)]
     pub fn communicate_with_picc(
         &mut self,
         command: Command, // The command to execute. One of the PCD_Command enums.
         wait_irq: u8, // The bits in the ComIrqReg register that signals successful completion of the command.
         send_data: &[u8], // Pointer to the data to transfer to the FIFO.
-        _send_len: u8, // Number of bytes to transfer to the FIFO.
         back_len: u8, // Max number of bytes that should be returned.
         valid_bits: u8, // The number of valid bits in the last byte. 0 for 8 valid bits.
         rx_align: u8, // Defines the bit position for the first bit received. Default 0.
@@ -365,7 +370,6 @@ impl MFRC522 {
     pub fn transceive_data(
         &mut self,
         send_data: &[u8], // Pointer to the data to transfer to the FIFO.
-        send_len: u8,     // Number of bytes to transfer to the FIFO.
         back_len: u8,     // Max number of bytes that should be returned.
         valid_bits: u8,   // The number of valid bits in the last byte. 0 for 8 valid bits.
         rx_align: u8,     // Defines the bit position for the first bit received. Default 0.
@@ -377,7 +381,6 @@ impl MFRC522 {
             Command::Transceive,
             wait_irq,
             send_data,
-            send_len,
             back_len,
             valid_bits,
             rx_align,
@@ -385,10 +388,32 @@ impl MFRC522 {
         )
     }
 
+    /**
+     * Transmits a REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
+     * Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
+     *
+     * @return STATUS_OK on success, STATUS_??? otherwise.
+     */
     pub fn request_a(&mut self, buffer_size: u8) -> Result<Vec<u8>> {
         self.request_a_or_wakeup_a(picc::Command::REQA, buffer_size)
     }
 
+    /**
+     * Transmits a Wake-UP command, Type A. Invites PICCs in state IDLE and HALT to go to READY(*) and prepare for anticollision or selection. 7 bit frame.
+     * Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
+     *
+     * @return STATUS_OK on success, STATUS_??? otherwise.
+     */
+    pub fn wakeup_a(&mut self, buffer_size: u8) -> Result<Vec<u8>> {
+        self.request_a_or_wakeup_a(picc::Command::WUPA, buffer_size)
+    }
+
+    /**
+     * Transmits REQA or WUPA commands.
+     * Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
+     *
+     * @return STATUS_OK on success, STATUS_??? otherwise.
+     */
     pub fn request_a_or_wakeup_a(
         &mut self,
         command: picc::Command, // The command to send - PICC_CMD_REQA or PICC_CMD_WUPA
@@ -404,7 +429,7 @@ impl MFRC522 {
                                                                // TxLastBits = BitFramingReg[2..0]
         let valid_bits = 7;
         let picc_response =
-            self.transceive_data(&[command as u8], 1, buffer_size, valid_bits, 0, false)?;
+            self.transceive_data(&[command as u8], buffer_size, valid_bits, 0, false)?;
 
         if picc_response.data.len() != 2 || picc_response.valid_bits != 0 {
             // ATQA must be exactly 16 bits.
@@ -414,6 +439,23 @@ impl MFRC522 {
         Ok(picc_response.data)
     }
 
+    /**
+     * Transmits SELECT/ANTICOLLISION commands to select a single PICC.
+     * Before calling this function the PICCs must be placed in the READY(*) state by calling PICC_RequestA() or PICC_WakeupA().
+     * On success:
+     * 		- The chosen PICC is in state ACTIVE(*) and all other PICCs have returned to state IDLE/HALT. (Figure 7 of the ISO/IEC 14443-3 draft.)
+     * 		- The UID size and value of the chosen PICC is returned in *uid along with the SAK.
+     *
+     * A PICC UID consists of 4, 7 or 10 bytes.
+     * Only 4 bytes can be specified in a SELECT command, so for the longer UIDs two or three iterations are used:
+     * 		UID size	Number of UID bytes		Cascade levels		Example of PICC
+     * 		========	===================		==============		===============
+     * 		single				 4						1				MIFARE Classic
+     * 		double				 7						2				MIFARE Ultralight
+     * 		triple				10						3				Not currently in use?
+     *
+     * @return STATUS_OK on success, STATUS_??? otherwise.
+     */
     pub fn picc_select(
         &mut self,
         valid_bits: u8, // The number of bits supplied in uid_in. If not 0, uid_in should be Some.
@@ -576,7 +618,6 @@ impl MFRC522 {
                 // Transmit the buffer and receive the response.
                 match self.transceive_data(
                     &buffer[0..buffer_used as usize],
-                    buffer_used,
                     response_length,
                     tx_last_bits,
                     rx_align,
@@ -675,17 +716,16 @@ impl MFRC522 {
     }
 
     pub fn halt_a(&mut self) -> Result<()> {
-        let mut buffer = vec![picc::Command::HLTA as u8, 0, 0, 0];
-        let crc = self.calculate_crc(&buffer[0..2])?;
-        buffer[2] = crc[0];
-        buffer[3] = crc[1];
+        let mut buffer = vec![picc::Command::HLTA as u8, 0];
+        let crc = self.calculate_crc(&buffer)?;
+        buffer.extend_from_slice(&crc);
 
         // Send the command.
         // The standard says:
         //		If the PICC responds with any modulation during a period of 1 ms after the end of the frame containing the
         //		HLTA command, this response shall be interpreted as 'not acknowledge'.
         // We interpret that this way: Only STATUS_TIMEOUT is a success.
-        match self.transceive_data(&buffer, 4, 0, 0, 0, false) {
+        match self.transceive_data(&buffer, 0, 0, 0, false) {
             Err(Error::Timeout) => Ok(()),
             Ok(_) => Err(Error::Invalid),
             Err(e) => Err(e),
@@ -729,7 +769,7 @@ impl MFRC522 {
         }
 
         // Start the authentication.
-        self.communicate_with_picc(Command::MFAuthent, wait_irq, &send_data, 12, 0, 0, 0, false)
+        self.communicate_with_picc(Command::MFAuthent, wait_irq, &send_data, 0, 0, 0, false)
     }
 
     pub fn stop_crypto1(&mut self) -> Result<()> {
@@ -764,7 +804,7 @@ impl MFRC522 {
         send_data.extend_from_slice(&crc);
 
         // Transmit the buffer and receive the response, validate CRC_A.
-        self.transceive_data(&send_data, 4, back_len, 0, 0, true)
+        self.transceive_data(&send_data, back_len, 0, 0, true)
     }
 
     /**
@@ -785,7 +825,7 @@ impl MFRC522 {
 
         // Mifare Classic protocol requires two communications to perform a write.
         // Step 1: Tell the PICC we want to write to block blockAddr.
-        let mut cmd_buffer = vec![picc::Command::MfWrite as u8, block_addr];
+        let cmd_buffer = vec![picc::Command::MfWrite as u8, block_addr];
         self.mifare_transceive(&cmd_buffer, false)?;
 
         self.mifare_transceive(buffer, false)
@@ -815,7 +855,6 @@ impl MFRC522 {
             Command::Transceive,
             wait_irq,
             &cmd_buffer,
-            0,
             cmd_buffer.len() as u8,
             valid_bits,
             0,
