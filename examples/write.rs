@@ -1,4 +1,4 @@
-use spidev::{Spidev, SpidevOptions, SPI_MODE_0};
+use spidev::{Spidev, SpidevOptions, SpiModeFlags};
 use std::io;
 
 extern crate rfid_rs;
@@ -9,7 +9,7 @@ fn create_spi() -> io::Result<Spidev> {
     let options = SpidevOptions::new()
         .bits_per_word(8)
         .max_speed_hz(20_000)
-        .mode(SPI_MODE_0)
+        .mode(SpiModeFlags::SPI_MODE_0)
         .build();
     spi.configure(&options)?;
     Ok(spi)
