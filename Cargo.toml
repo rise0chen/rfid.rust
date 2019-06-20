@@ -3,6 +3,11 @@ name = "rfid-rs"
 version = "0.1.0"
 authors = ["Jonas Spanoghe <jonas@spanoghe.net>"]
 edition = "2018"
+description = "Linux MFRC522 library"
+license = "MIT OR Apache-2.0"
+repository = "https://gitlab.com/jspngh/rfid-rs"
+keywords = ["rfid", "mfrc522", "mifare"]
+categories = ["embedded"]
 
 [dependencies]
-spidev = "0.3"
+spidev = "0.4"
