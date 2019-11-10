@@ -113,8 +113,8 @@ type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct Uid {
-    bytes: Vec<u8>,         // The UID can have 4, 7 or 10 bytes.
-    select_acknowledge: u8, // The SAK (Select acknowledge) byte returned from the PICC after successful selection.
+    pub bytes: Vec<u8>,         // The UID can have 4, 7 or 10 bytes.
+        select_acknowledge: u8, // The SAK (Select acknowledge) byte returned from the PICC after successful selection.
 }
 
 const MIFARE_ACK: u8 = 0xA;
