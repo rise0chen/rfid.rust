@@ -1,43 +1,78 @@
+//! The PICC (short for Proximity Integrated Circuit Card) is a card or tag using the ISO 14443A interface, eg Mifare or NTAG203.
+
+/// Commands that can be send to the PICC.\
+/// The commands used for MIFARE Classic begin with **Mf** (cfr [Section 9](http://www.mouser.com/ds/2/302/MF1S503x-89574.pdf)).\
+/// The commands used for MIFARE Ultralight begin with **Ul** (cfr [Section 8.6](http://www.nxp.com/documents/data_sheet/MF0ICU1.pdf)).\
+/// Use PCD_MFAuthent to authenticate access to a sector,\
+/// then use the other commands to read/write/modify the blocks on the sector.\
+/// The read/write commands can also be used for MIFARE Ultralight.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
-    REQA = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
-    WUPA = 0x52, // Wake-UP command, Type A. Invites PICCs in state IDLE and HALT to go to READY(*) and prepare for anticollision or selection. 7 bit frame.
-    CT = 0x88,   // Cascade Tag. Not really a command, but used during anti collision.
-    SelCl1 = 0x93, // Anti collision/Select, Cascade Level 1
-    SelCl2 = 0x95, // Anti collision/Select, Cascade Level 2
-    SelCl3 = 0x97, // Anti collision/Select, Cascade Level 3
-    HLTA = 0x50, // HaLT command, Type A. Instructs an ACTIVE PICC to go to state HALT.
-    RATS = 0xE0, // Request command for Answer To Reset.
-    // The commands used for MIFARE Classic (from http://www.mouser.com/ds/2/302/MF1S503x-89574.pdf, Section 9)
-    // Use PCD_MFAuthent to authenticate access to a sector, then use these commands to read/write/modify the blocks on the sector.
-    // The read/write commands can also be used for MIFARE Ultralight.
-    MfAuthKeyA = 0x60,  // Perform authentication with Key A
-    MfAuthKeyB = 0x61,  // Perform authentication with Key B
-    MfRead = 0x30, // Reads one 16 byte block from the authenticated sector of the PICC. Also used for MIFARE Ultralight.
-    MfWrite = 0xA0, // Writes one 16 byte block to the authenticated sector of the PICC. Called "COMPATIBILITY WRITE" for MIFARE Ultralight.
-    MfDecrement = 0xC0, // Decrements the contents of a block and stores the result in the internal data register.
-    MfIncrement = 0xC1, // Increments the contents of a block and stores the result in the internal data register.
-    MfRestore = 0xC2,   // Reads the contents of a block into the internal data register.
-    MfTransfer = 0xB0,  // Writes the contents of the internal data register to a block.
-    // The commands used for MIFARE Ultralight (from http://www.nxp.com/documents/data_sheet/MF0ICU1.pdf, Section 8.6)
-    // The PICC_CMD_MF_READ and PICC_CMD_MF_WRITE can also be used for MIFARE Ultralight.
-    UlWrite = 0xA2, // Writes one 4 byte page to the PICC.
+    /// REQuest command, Type A. invites PICCs in state IDLE to go to READY\
+    /// and prepare for anticollision or selection. 7 bit frame.
+    REQA = 0x26,
+    /// Wake-UP command, Type A. invites PICCs in state IDLE and HALT to go to READY(*)\
+    /// and prepare for anticollision or selection. 7 bit frame.
+    WUPA = 0x52,
+    /// Cascade Tag. Not really a command, but used during anti collision.
+    CT = 0x88,
+    /// Anti collision/Select, Cascade Level 1
+    SelCl1 = 0x93,
+    /// Anti collision/Select, Cascade Level 2
+    SelCl2 = 0x95,
+    /// Anti collision/Select, Cascade Level 3
+    SelCl3 = 0x97,
+    /// HaLT command, Type A. Instructs an ACTIVE PICC to go to state HALT.
+    HLTA = 0x50,
+    /// Request command for Answer To Reset.
+    RATS = 0xE0,
+    /// Perform authentication with Key A
+    MfAuthKeyA = 0x60,
+    /// Perform authentication with Key B
+    MfAuthKeyB = 0x61,
+    /// Reads one 16 byte block from the authenticated sector of the PICC.\
+    /// Also used for MIFARE Ultralight.
+    MfRead = 0x30,
+    /// Writes one 16 byte block to the authenticated sector of the PICC.\
+    /// Called "COMPATIBILITY WRITE" for MIFARE Ultralight.
+    MfWrite = 0xA0,
+    /// Decrements the contents of a block and stores the result in the internal data register.
+    MfDecrement = 0xC0,
+    /// Increments the contents of a block and stores the result in the internal data register.
+    MfIncrement = 0xC1,
+    /// Reads the contents of a block into the internal data register.
+    MfRestore = 0xC2,
+    /// Writes the contents of the internal data register to a block.
+    MfTransfer = 0xB0,
+    /// Writes one 4 byte page to the PICC.
+    UlWrite = 0xA2,
 }
 
+/// PICC Type
 #[derive(Debug)]
 pub enum Type {
     Unknown,
-    Iso14443_4,    // PICC compliant with ISO/IEC 14443-4 
-    Iso18092,      // PICC compliant with ISO/IEC 18092 (NFC)
-    MifareMini,    // MIFARE Classic protocol, 320 bytes
-    Mifare1k,      // MIFARE Classic protocol, 1KB
-    Mifare4k,      // MIFARE Classic protocol, 4KB
-    MifareUL,      // MIFARE Ultralight or Ultralight C
-    MifarePlus,    // MIFARE Plus
-    MifareDesfire, // MIFARE DESFire
-    TNP3XXX,       // Only mentioned in NXP AN 10833 MIFARE Type Identification Procedure
-    NotComplete,   // SAK indicates UID is not complete.
+    /// PICC compliant with ISO/IEC 14443-4
+    Iso14443_4,
+    /// PICC compliant with ISO/IEC 18092 (NFC)
+    Iso18092,
+    /// MIFARE Classic protocol, 320 bytes
+    MifareMini,
+    /// MIFARE Classic protocol, 1KB
+    Mifare1k,
+    /// MIFARE Classic protocol, 4KB
+    Mifare4k,
+    /// MIFARE Ultralight or Ultralight C
+    MifareUL,
+    /// MIFARE Plus
+    MifarePlus,
+    /// MIFARE DESFire
+    MifareDesfire,
+    /// Only mentioned in NXP AN 10833 MIFARE Type Identification Procedure
+    TNP3XXX,
+    /// SAK indicates UID is not complete.
+    NotComplete,
 }
 
 #[derive(Debug)]
@@ -48,7 +83,7 @@ pub struct Response {
 }
 
 pub fn get_type(sak: u8) -> Type {
-    // http://www.nxp.com/documents/application_note/AN10833.pdf 
+    // http://www.nxp.com/documents/application_note/AN10833.pdf
     // 3.2 Coding of Select Acknowledge (SAK)
     // ignore 8-bit (iso14443 starts with LSBit = bit 1)
     // fixes wrong type for manufacturer Infineon (http://nfc-tools.org/index.php?title=ISO14443A)

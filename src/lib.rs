@@ -8,6 +8,7 @@ use spidev;
 
 pub mod picc;
 
+/// Registers in the MFRC522, the Proximity Coupling Device (PCD) used here.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum Register {
@@ -253,12 +254,12 @@ impl MFRC522 {
         Err(Error::Timeout)
     }
 
-    /**
-     * Transfers data to the MFRC522 FIFO, executes a command, waits for completion and transfers data back from the FIFO.
-     * CRC validation will only be done if back_len is specified.
-     *
-     * @return STATUS_OK on success, STATUS_??? otherwise.
-     */
+    /// Transfers data to the MFRC522 FIFO, executes a command,\
+    /// waits for completion and transfers data back from the FIFO.\
+    /// CRC validation will only be done if back_len is specified.
+    ///
+    /// @return STATUS_OK on success, STATUS_??? otherwise.
+    ///
     #[allow(clippy::too_many_arguments)]
     pub fn communicate_with_picc(
         &mut self,
@@ -388,32 +389,31 @@ impl MFRC522 {
         )
     }
 
-    /**
-     * Transmits a REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
-     * Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
-     *
-     * @return STATUS_OK on success, STATUS_??? otherwise.
-     */
+    /// Transmits a REQuest command, Type A. Invites PICCs in state IDLE to go to READY\
+    /// and prepare for anticollision or selection. 7 bit frame.\
+    /// Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
+    ///
+    /// @return STATUS_OK on success, STATUS_??? otherwise.
+    ///
     pub fn request_a(&mut self, buffer_size: u8) -> Result<Vec<u8>> {
         self.request_a_or_wakeup_a(picc::Command::REQA, buffer_size)
     }
 
-    /**
-     * Transmits a Wake-UP command, Type A. Invites PICCs in state IDLE and HALT to go to READY(*) and prepare for anticollision or selection. 7 bit frame.
-     * Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
-     *
-     * @return STATUS_OK on success, STATUS_??? otherwise.
-     */
+    /// Transmits a Wake-UP command, Type A. Invites PICCs in state IDLE and HALT to go to READY(*)\
+    /// and prepare for anticollision or selection. 7 bit frame.\
+    /// Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
+    ///
+    /// @return STATUS_OK on success, STATUS_??? otherwise.
+    ///
     pub fn wakeup_a(&mut self, buffer_size: u8) -> Result<Vec<u8>> {
         self.request_a_or_wakeup_a(picc::Command::WUPA, buffer_size)
     }
 
-    /**
-     * Transmits REQA or WUPA commands.
-     * Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
-     *
-     * @return STATUS_OK on success, STATUS_??? otherwise.
-     */
+    /// Transmits REQA or WUPA commands.\
+    /// Beware: When two PICCs are in the field at the same time I often get STATUS_TIMEOUT - probably due do bad antenna design.
+    ///
+    /// @return STATUS_OK on success, STATUS_??? otherwise.
+    ///
     pub fn request_a_or_wakeup_a(
         &mut self,
         command: picc::Command, // The command to send - PICC_CMD_REQA or PICC_CMD_WUPA
@@ -439,23 +439,22 @@ impl MFRC522 {
         Ok(picc_response.data)
     }
 
-    /**
-     * Transmits SELECT/ANTICOLLISION commands to select a single PICC.
-     * Before calling this function the PICCs must be placed in the READY(*) state by calling PICC_RequestA() or PICC_WakeupA().
-     * On success:
-     * 		- The chosen PICC is in state ACTIVE(*) and all other PICCs have returned to state IDLE/HALT. (Figure 7 of the ISO/IEC 14443-3 draft.)
-     * 		- The UID size and value of the chosen PICC is returned in *uid along with the SAK.
-     *
-     * A PICC UID consists of 4, 7 or 10 bytes.
-     * Only 4 bytes can be specified in a SELECT command, so for the longer UIDs two or three iterations are used:
-     * 		UID size	Number of UID bytes		Cascade levels		Example of PICC
-     * 		========	===================		==============		===============
-     * 		single				 4						1				MIFARE Classic
-     * 		double				 7						2				MIFARE Ultralight
-     * 		triple				10						3				Not currently in use?
-     *
-     * @return STATUS_OK on success, STATUS_??? otherwise.
-     */
+    /// Transmits SELECT/ANTICOLLISION commands to select a single PICC.\
+    /// Before calling this function the PICCs must be placed in the READY(*) state by calling PICC_RequestA() or PICC_WakeupA().\
+    /// On success:
+    /// 		- The chosen PICC is in state ACTIVE(*) and all other PICCs have returned to state IDLE/HALT. (Figure 7 of the ISO/IEC 14443-3 draft.)
+    /// 		- The UID size and value of the chosen PICC is returned in *uid along with the SAK.
+    ///
+    /// A PICC UID consists of 4, 7 or 10 bytes.
+    /// Only 4 bytes can be specified in a SELECT command, so for the longer UIDs two or three iterations are used:
+    ///
+    /// | UID size | Number of UID bytes | Cascade levels | Example of PICC       |
+    /// | -------- |:-------------------:|:--------------:| --------------------- |
+    /// | single   |        4            |        1	      | MIFARE Classic        |
+    /// | double   |        7            |        2	      | MIFARE Ultralight     |
+    /// | triple   |        0            |        3	      | Not currently in use? |
+    ///
+    /// @return STATUS_OK on success, STATUS_??? otherwise.
     pub fn picc_select(
         &mut self,
         valid_bits: u8, // The number of bits supplied in uid_in. If not 0, uid_in should be Some.
