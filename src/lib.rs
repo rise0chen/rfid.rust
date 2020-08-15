@@ -623,10 +623,10 @@ impl MFRC522 {
                     false,
                 ) {
                     Ok(response) => {
-                        println!(
-                            "Received select data: {:?} with clkb: {:?}",
-                            response.data, current_level_known_bits
-                        );
+                        // println!(
+                        //     "Received select data: {:?} with clkb: {:?}",
+                        //     response.data, current_level_known_bits
+                        // );
                         picc_response = response;
                         // TODO: this is wrong, &buffer[6..] does not use index
                         for (i, &e) in picc_response.data.iter().enumerate() {
