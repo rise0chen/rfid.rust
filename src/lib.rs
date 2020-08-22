@@ -450,9 +450,9 @@ impl MFRC522 {
     ///
     /// | UID size | Number of UID bytes | Cascade levels | Example of PICC       |
     /// | -------- |:-------------------:|:--------------:| --------------------- |
-    /// | single   |        4            |        1	      | MIFARE Classic        |
-    /// | double   |        7            |        2	      | MIFARE Ultralight     |
-    /// | triple   |        0            |        3	      | Not currently in use? |
+    /// | single   |        4            |        1       | MIFARE Classic        |
+    /// | double   |        7            |        2       | MIFARE Ultralight     |
+    /// | triple   |        0            |        3       | Not currently in use? |
     ///
     /// @return STATUS_OK on success, STATUS_??? otherwise.
     pub fn picc_select(
