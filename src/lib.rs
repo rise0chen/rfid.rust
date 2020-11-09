@@ -1,12 +1,14 @@
-use std::io;
-use std::io::prelude::*;
-use std::result;
-use std::thread;
-use std::time;
+#![no_std]
+extern crate alloc;
 
-use spidev;
-
+mod com;
+pub mod com_i2c;
 pub mod picc;
+
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+use com::Com;
 
 /// Registers in the MFRC522, the Proximity Coupling Device (PCD) used here.
 #[allow(dead_code)]
@@ -93,7 +95,6 @@ pub enum Command {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Error {
-    Io(io::Error), // Error from std::io
     Communication, // Error in communication
     Collision,     // Collission detected
     Timeout,       // Timeout in communication.
@@ -104,18 +105,12 @@ pub enum Error {
     MifareNack,    // A MIFARE PICC responded with NAK.
 }
 
-impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self {
-        Error::Io(error)
-    }
-}
-
-type Result<T> = result::Result<T, Error>;
+type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct Uid {
-    pub bytes: Vec<u8>,         // The UID can have 4, 7 or 10 bytes.
-        select_acknowledge: u8, // The SAK (Select acknowledge) byte returned from the PICC after successful selection.
+    pub bytes: Vec<u8>,     // The UID can have 4, 7 or 10 bytes.
+    select_acknowledge: u8, // The SAK (Select acknowledge) byte returned from the PICC after successful selection.
 }
 
 const MIFARE_ACK: u8 = 0xA;
@@ -124,58 +119,38 @@ const MIFARE_KEYSIZE: usize = 6;
 pub type MifareKey = [u8; MIFARE_KEYSIZE];
 
 pub struct MFRC522 {
-    pub spi: spidev::Spidev,
+    com: Box<dyn Com>,
 }
-
 impl MFRC522 {
-    fn register_to_readvalue(reg: Register) -> u8 {
-        (((reg as u8) << 1) | 0b1000_0000) & 0b1111_1110
+    pub fn new(com: Box<dyn Com>) -> Self {
+        Self { com: com }
     }
-
-    fn register_to_writevalue(reg: Register) -> u8 {
-        ((reg as u8) << 1) & 0b0111_1110
-    }
-
     pub fn read_register(&mut self, reg: Register) -> Result<u8> {
-        let rval = MFRC522::register_to_readvalue(reg);
-
-        let tx_buf = [rval, 0];
         let mut rx_buf = [0; 2];
-        {
-            let mut transfer = spidev::SpidevTransfer::read_write(&tx_buf, &mut rx_buf);
-            self.spi.transfer(&mut transfer)?;
-        }
+        self.com.write(reg as u8, &[]);
+        self.com.read(reg as u8, &mut rx_buf);
         // println!("Read {:#x?} from {:?}", rx_buf[1], reg);
         Ok(rx_buf[1])
     }
-
     pub fn read_multiple(&mut self, reg: Register, count: usize) -> Result<Vec<u8>> {
         if count == 0 {
             return Ok(Vec::new());
         }
-        let address = MFRC522::register_to_readvalue(reg);
-        let mut tx_buf = vec![address; count];
-        tx_buf.push(0);
-        let mut rx_buf = vec![0u8; count + 1];
-        {
-            let mut transfer = spidev::SpidevTransfer::read_write(&tx_buf, &mut rx_buf);
-            self.spi.transfer(&mut transfer)?;
-        }
+        let mut rx_buf = vec![0; count];
+        self.com.write(reg as u8, &[]);
+        self.com.read(reg as u8, &mut rx_buf);
         // println!("Read {:#x?} from {:?}", rx_buf, reg);
-        rx_buf.remove(0);
         Ok(rx_buf)
     }
 
     pub fn write_register(&mut self, reg: Register, value: u8) -> Result<()> {
-        let rval = MFRC522::register_to_writevalue(reg);
-        self.spi.write_all(&[rval, value])?;
+        self.com.write(reg as u8, &[value]);
         // println!("Wrote {:#x?} to {:?}", value, reg);
         Ok(())
     }
 
     pub fn write_multiple(&mut self, reg: Register, value: &[u8]) -> Result<()> {
-        let rval = MFRC522::register_to_writevalue(reg);
-        self.spi.write_all(&[&[rval], value].concat())?;
+        self.com.write(reg as u8, value);
         // println!("Wrote {:#x?} to {:?}", value, reg);
         Ok(())
     }
@@ -204,7 +179,6 @@ impl MFRC522 {
         self.write_register(Register::CommandReg, Command::SoftReset as u8)?;
         let mut count = 0;
         loop {
-            thread::sleep(time::Duration::from_millis(50));
             let cmd_val = self.read_register(Register::CommandReg)?;
             if cmd_val & (1 << 4) == 0 || count >= 3 {
                 break;
@@ -837,7 +811,6 @@ impl MFRC522 {
      * @return STATUS_OK on success, STATUS_??? otherwise.
      */
     pub fn mifare_transceive(&mut self, send_data: &[u8], accept_timeout: bool) -> Result<()> {
-
         if send_data.len() > 16 {
             return Err(Error::Invalid);
         }
@@ -890,26 +863,5 @@ impl MFRC522 {
     pub fn read_card_serial(&mut self) -> Result<Uid> {
         let result = self.picc_select(0, None)?;
         Ok(result)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_to_readvalue() {
-        assert_eq!(
-            MFRC522::register_to_readvalue(Register::CommandReg),
-            0b1000_0010
-        );
-        assert_eq!(
-            MFRC522::register_to_readvalue(Register::DivlEnReg),
-            0b1000_0110
-        );
-        assert_eq!(
-            MFRC522::register_to_readvalue(Register::TestADCReg),
-            0b1111_0110
-        );
     }
 }

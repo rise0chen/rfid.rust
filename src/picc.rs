@@ -1,5 +1,7 @@
 //! The PICC (short for Proximity Integrated Circuit Card) is a card or tag using the ISO 14443A interface, eg Mifare or NTAG203.
 
+use alloc::vec::Vec;
+
 /// Commands that can be send to the PICC.\
 /// The commands used for MIFARE Classic begin with **Mf** (cfr [Section 9](http://www.mouser.com/ds/2/302/MF1S503x-89574.pdf)).\
 /// The commands used for MIFARE Ultralight begin with **Ul** (cfr [Section 8.6](http://www.nxp.com/documents/data_sheet/MF0ICU1.pdf)).\
@@ -97,6 +99,6 @@ pub fn get_type(sak: u8) -> Type {
         0x01 => Type::TNP3XXX,
         0x20 => Type::Iso14443_4,
         0x40 => Type::Iso18092,
-        _ =>    Type::Unknown,
+        _ => Type::Unknown,
     }
 }
