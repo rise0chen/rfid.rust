@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 /// then use the other commands to read/write/modify the blocks on the sector.\
 /// The read/write commands can also be used for MIFARE Ultralight.
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub enum Command {
     /// REQuest command, Type A. invites PICCs in state IDLE to go to READY\
     /// and prepare for anticollision or selection. 7 bit frame.
@@ -52,7 +52,6 @@ pub enum Command {
 }
 
 /// PICC Type
-#[derive(Debug)]
 pub enum Type {
     Unknown,
     /// PICC compliant with ISO/IEC 14443-4
@@ -77,7 +76,6 @@ pub enum Type {
     NotComplete,
 }
 
-#[derive(Debug)]
 pub struct Response {
     pub data: Vec<u8>,
     pub valid_bits: u8,

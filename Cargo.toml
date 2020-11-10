@@ -1,15 +1,16 @@
 [package]
 name = "rfid"
-version = "0.1.4"
-authors = ["Jonas Spanoghe <jonas@spanoghe.net>"]
-edition = "2018"
-description = "MFRC522 library"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/rise0chen/rfid.rust.git"
+version = "0.1.0"
+authors = ["rise0chen <rise0chen@163.com>"]
+description = "RFID"
+documentation = "https://docs.rs/unmp"
 homepage = "https://github.com/rise0chen/rfid.rust.git"
-keywords = ["rfid", "mfrc522", "mifare"]
+repository = "https://github.com/rise0chen/rfid.rust.git"
+readme = "./README.md"
+keywords = ["rfid", "mfrc522"]
 categories = ["embedded"]
-readme = "crate.info"
+license-file = "LICENSE"
+edition = "2018"
 
 [dependencies]
 embedded-hal = "0.2"
